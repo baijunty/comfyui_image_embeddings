@@ -145,6 +145,52 @@ class ImageLoader:
         # 如果是URL，每次都重新加载，因为内容可能已更改
         return image_path_or_url
 
+
+class Image2Base64:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "images": ("IMAGE",),
+                "names": ("STRING",), },
+        }
+    CATEGORY = "utils"
+    RETURN_TYPES = ('STRING',)
+    FUNCTION = "image_to_base64"
+    def image_to_base64(self, images,names):
+        """
+        将输入的图像张量转换为base64编码，并按名称:编码内容的格式输出JSON字符串
+        """
+        
+        # 创建结果字典
+        result_dict = {}
+        file_names=[]
+        import base64
+        if isinstance(names, list):
+            file_names = names
+        else:
+            file_names = [names]
+        # 遍历图像批次
+        for index, image in enumerate(images):
+            
+            # 转换图像张量为PIL图像
+            n = 255. * image.cpu().numpy()
+            img = Image.fromarray(np.clip(n, 0, 255).astype(np.uint8))
+            
+            # 将PIL图像转换为base64
+            buffer = BytesIO()
+            img.save(buffer, format="PNG")
+            img_bytes = buffer.getvalue()
+            img_base64 = base64.b64encode(img_bytes).decode('utf-8')
+            
+            # 添加到结果字典
+            result_dict[file_names[index]] = img_base64
+        
+        # 将结果字典转换为JSON字符串
+        json_string = json.dumps(result_dict)
+        
+        return (json_string,)
+
 class VisionOutputEmbedding2JSON:
     @classmethod
     def INPUT_TYPES(s):
@@ -237,12 +283,14 @@ class ImageHashNode:
 NODE_CLASS_MAPPINGS = {
     "ImageLoader": ImageLoader,
     "OutputEmbedding": VisionOutputEmbedding2JSON,
-    "ImageHash": ImageHashNode
+    "ImageHash": ImageHashNode,
+    "Image2Base64": Image2Base64,
 }
 
 # A dictionary that contains the friendly/humanly readable titles for the nodes
 NODE_DISPLAY_NAME_MAPPINGS = {
     "ImageLoader": "Image Loader (Path or URL)",
     "OutputEmbedding": "Output Embedding to JSON",
-    "ImageHash": "Image Hash"
+    "ImageHash": "Image Hash",
+    "Image2Base64": "Image to Base64",
 }
