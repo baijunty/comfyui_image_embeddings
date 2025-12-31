@@ -8,8 +8,45 @@ import os
 from io import BytesIO
 from torchvision import transforms
 
+def process_image(img,name):
+    output_images = []
+    output_masks = []
+    w, h = None, None
+    excluded_formats = ['MPO']
+    for i in Image.Spin(img) if hasattr(Image, 'Spin') else [img]:
+        if i.mode == 'I':
+            i = i.point(lambda i: i * (1 / 255))
+        image = i.convert("RGB")
 
-class ImageLoader:
+        if len(output_images) == 0:
+            w = image.size[0]
+            h = image.size[1]
+
+        if image.size[0] != w or image.size[1] != h:
+            continue
+
+        image = np.array(image).astype(np.float32) / 255.0
+        image = torch.from_numpy(image)[None,]
+        if 'A' in i.getbands():
+            mask = np.array(i.getchannel('A')).astype(np.float32) / 255.0
+            mask = 1. - torch.from_numpy(mask)
+        elif i.mode == 'P' and 'transparency' in i.info:
+            mask = np.array(i.convert('RGBA').getchannel('A')).astype(np.float32) / 255.0
+            mask = 1. - torch.from_numpy(mask)
+        else:
+            mask = torch.zeros((64,64), dtype=torch.float32, device="cpu")
+        output_images.append(image)
+        output_masks.append(mask.unsqueeze(0))
+
+    if len(output_images) > 1 and img.format not in excluded_formats:
+        output_image = torch.cat(output_images, dim=0)
+        output_mask = torch.cat(output_masks, dim=0)
+    else:
+        output_image = output_images[0]
+        output_mask = output_masks[0]
+    return (output_image, output_mask,name)
+
+class CustomImageLoader:
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -30,16 +67,10 @@ class ImageLoader:
             return self.load_image_from_path(image_path_or_url)
 
     def load_image_from_url(self, url):
-        try:
-            response = requests.get(url, timeout=90)
-            response.raise_for_status()
-            img = Image.open(BytesIO(response.content))
-        except Exception as e:
-            print(f"Error loading image from URL {url}: {e}")
-            # 返回一个空图像
-            img = Image.new("RGB", (512, 512), color='black')
-        
-        return self.process_image(img,url.split('/')[-1])
+        response = requests.get(url, timeout=90)
+        response.raise_for_status()
+        img = Image.open(BytesIO(response.content))
+        return process_image(img,url.split('/')[-1])
 
     def load_image_from_path(self, image_path):
         # 检查是否为相对路径或绝对路径
@@ -47,13 +78,6 @@ class ImageLoader:
             # 如果不是绝对路径，尝试在ComfyUI的input目录中查找
             input_dir = folder_paths.get_input_directory()
             image_path = os.path.join(input_dir, image_path)
-        
-        # 验证路径是否存在
-        if not os.path.exists(image_path):
-            print(f"Invalid image path: {image_path}")
-            # 返回一个空图像
-            img = Image.new("RGB", (512, 512), color='black')
-            return self.process_image(img,'')
         
         # 检查是否为目录
         if os.path.isdir(image_path):
@@ -65,11 +89,6 @@ class ImageLoader:
                 if file_ext in image_extensions:
                     image_files.append(os.path.join(image_path, file))
             
-            if not image_files:
-                print(f"No image files found in directory: {image_path}")
-                img = Image.new("RGB", (512, 512), color='black')
-                return self.process_image(img,'')
-            
             # 按文件名排序，保证顺序一致
             image_files.sort()
             
@@ -78,67 +97,18 @@ class ImageLoader:
             all_masks = []
             all_names = []
             for img_path in image_files:
-                try:
-                    img = Image.open(img_path)
-                    processed_img, processed_mask,_ = self.process_image(img,'')
-                    all_images.append(processed_img)
-                    all_masks.append(processed_mask)
-                    all_names.append(os.path.basename(img_path))
-                except Exception as e:
-                    print(f"Error loading image {img_path}: {e}")
-            
-            if not all_images:
-                print(f"No valid images could be loaded from directory: {image_path}")
-                img = Image.new("RGB", (512, 512), color='black')
-                return self.process_image(img,'')
+                img = Image.open(img_path)
+                processed_img, processed_mask,_ = process_image(img,'')
+                all_images.append(processed_img)
+                all_masks.append(processed_mask)
+                all_names.append(os.path.basename(img_path))
             
             return (all_images, all_masks,all_names)
         else:
             # 原来的单个文件处理逻辑
             img = Image.open(image_path)
-            return self.process_image(img,os.path.basename(image_path))
+            return process_image(img,os.path.basename(image_path))
 
-    def process_image(self, img,name):
-        # 处理图像，参考ComfyUI的LoadImage节点
-        output_images = []
-        output_masks = []
-        w, h = None, None
-
-        excluded_formats = ['MPO']
-
-        for i in Image.Spin(img) if hasattr(Image, 'Spin') else [img]:
-            # 如果是多帧图像，只处理第一帧
-            if i.mode == 'I':
-                i = i.point(lambda i: i * (1 / 255))
-            image = i.convert("RGB")
-
-            if len(output_images) == 0:
-                w = image.size[0]
-                h = image.size[1]
-
-            if image.size[0] != w or image.size[1] != h:
-                continue
-
-            image = np.array(image).astype(np.float32) / 255.0
-            image = torch.from_numpy(image)[None,]
-            if 'A' in i.getbands():
-                mask = np.array(i.getchannel('A')).astype(np.float32) / 255.0
-                mask = 1. - torch.from_numpy(mask)
-            elif i.mode == 'P' and 'transparency' in i.info:
-                mask = np.array(i.convert('RGBA').getchannel('A')).astype(np.float32) / 255.0
-                mask = 1. - torch.from_numpy(mask)
-            else:
-                mask = torch.zeros((64,64), dtype=torch.float32, device="cpu")
-            output_images.append(image)
-            output_masks.append(mask.unsqueeze(0))
-
-        if len(output_images) > 1 and img.format not in excluded_formats:
-            output_image = torch.cat(output_images, dim=0)
-            output_mask = torch.cat(output_masks, dim=0)
-        else:
-            output_image = output_images[0]
-            output_mask = output_masks[0]
-        return (output_image, output_mask,name)
 
     @classmethod
     def IS_CHANGED(s, image_path_or_url):
@@ -278,19 +248,49 @@ class ImageHashNode:
         #list to str
         return (json.dumps(hashes),)
 
+class Base64ImageLoader:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "base64_string": ("STRING",),
+                "name": ("STRING",), },
+        }
+    CATEGORY = "utils"
+    RETURN_TYPES =  ("IMAGE", "MASK","STRING",)
+    FUNCTION = "load_base64_image"
+    def load_base64_image(self, base64_string,name):
+        """
+        将base64编码的图像数据转换为PIL图像对象。
+
+        Args:
+            base64_string (str): base64编码的图像数据。
+
+        Returns:
+            PIL.Image.Image: 转换后的PIL图像对象。
+        """
+        import base64
+        from io import BytesIO
+        # 将base64编码的字符串解码为字节流
+        image_bytes = base64.b64decode(base64_string)
+        image = Image.open(BytesIO(image_bytes))
+        return process_image(image,name)
+
 # A dictionary that contains all nodes you want to export with their names
 # NOTE: names should be globally unique
 NODE_CLASS_MAPPINGS = {
-    "ImageLoader": ImageLoader,
+    "CustomImageLoader": CustomImageLoader,
     "OutputEmbedding": VisionOutputEmbedding2JSON,
     "ImageHash": ImageHashNode,
     "Image2Base64": Image2Base64,
+    "Base64ImageLoader": Base64ImageLoader,
 }
 
 # A dictionary that contains the friendly/humanly readable titles for the nodes
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "ImageLoader": "Image Loader (Path or URL)",
+    "CustomImageLoader": "Image Loader (Path or URL)",
     "OutputEmbedding": "Output Embedding to JSON",
     "ImageHash": "Image Hash",
     "Image2Base64": "Image to Base64",
+    "Base64ImageLoader": "Base64 Image Loader",
 }
