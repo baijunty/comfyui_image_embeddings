@@ -1,67 +1,121 @@
-# Comfyui-Image-Embeddings
+# ComfyUI-Image-Embeddings
 
-use comfyui to image embeddings
+## 项目简介
 
-> [!NOTE]
-> This projected was created with a [cookiecutter](https://github.com/Comfy-Org/cookiecutter-comfy-extension) template. It helps you start writing custom nodes without worrying about the Python setup.
+本项目为 **ComfyUI** 提供一组实用的自定义节点，主要功能包括：
 
-## Quickstart
+- **CustomImageLoader**：支持从本地路径或 URL 加载单张或批量图像，自动处理透明通道并返回 `IMAGE`、`MASK` 与文件名。
+- **Image2Base64**：将 `IMAGE` 张量转为 Base64 编码的 JSON 字符串，便于在外部系统中传输图像数据。
+- **VisionOutputEmbedding2JSON**：将 ComfyUI 的 CLIP Vision 输出（`CLIP_VISION_OUTPUT`）转换为可读的 JSON，支持后续分析或存储。
+- **ImageHash**：基于 `imagehash` 库计算图像的哈希值（64 位有符号整数），返回 `STRING` JSON。
+- **Base64ImageLoader**：从 Base64 编码字符串恢复图像，返回 `IMAGE`、`MASK` 与文件名。
 
-1. Install [ComfyUI](https://docs.comfy.org/get_started).
-1. Install [ComfyUI-Manager](https://github.com/ltdrdata/ComfyUI-Manager)
-1. Look up this extension in ComfyUI-Manager. If you are installing manually, clone this repository under `ComfyUI/custom_nodes`.
-1. Restart ComfyUI.
+这些节点可直接在 ComfyUI 工作流中使用，帮助你在图像预处理、特征导出以及数据序列化等场景下提升开发效率。
 
-# Features
-
-- A list of features
-
-## Develop
-
-To install the dev dependencies and pre-commit (will run the ruff hook), do:
+## 安装
 
 ```bash
-cd image_embeddings
-pip install -e .[dev]
+# 1. 克隆仓库（或使用 ComfyUI-Manager 安装）
+git clone https://github.com/baijunty/comfyui_image_embeddings.git
+# 2. 进入目录并进行可编辑安装
+cd comfyui_image_embeddings
+pip install -e .[dev]   # 包含开发依赖
+# 3. 安装 pre-commit（可选）
 pre-commit install
 ```
 
-The `-e` flag above will result in a "live" install, in the sense that any changes you make to your node extension will automatically be picked up the next time you run ComfyUI.
+> **提示**：如果你使用 **ComfyUI‑Manager**，只需在管理器中搜索 `image_embeddings` 并安装。
 
-## Publish to Github
+## 节点使用说明
 
-Install Github Desktop or follow these [instructions](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent) for ssh.
+### 1. `CustomImageLoader`
 
-1. Create a Github repository that matches the directory name. 
-2. Push the files to Git
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `image_path_or_url` | `STRING` | 支持本地相对/绝对路径、URL，或指向目录的路径。目录时会一次性加载该目录下所有图片。 |
+
+返回值：
+
+- `IMAGE`：图像张量（`[B, H, W, C]`）
+- `MASK`：对应的遮罩张量
+- `STRING`：文件名（或 URL 中的文件名）
+
+**示例**：
+
+```python
+# 加载单张图片
+loader = CustomImageLoader()
+image, mask, name = loader.load_image("images/example.png")
+
+# 加载目录
+images, masks, names = loader.load_image("images/")
 ```
-git add .
-git commit -m "project scaffolding"
-git push
-``` 
 
-## Writing custom nodes
+### 2. `Image2Base64`
 
-An example custom node is located in [node.py](src/image_embeddings/nodes.py). To learn more, read the [docs](https://docs.comfy.org/essentials/custom_node_overview).
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `images` | `IMAGE` | 输入图像张量 |
+| `names`  | `STRING` | 对应文件名（可列表） |
 
+返回：
 
-## Tests
+- `STRING`：包含 `{filename: base64}` 键值对的 JSON 字符串
 
-This repo contains unit tests written in Pytest in the `tests/` directory. It is recommended to unit test your custom node.
+**示例**：
 
-- [build-pipeline.yml](.github/workflows/build-pipeline.yml) will run pytest and linter on any open PRs
-- [validate.yml](.github/workflows/validate.yml) will run [node-diff](https://github.com/Comfy-Org/node-diff) to check for breaking changes
+```python
+base64_str = Image2Base64().image_to_base64(images, names)[0]
+```
 
-## Publishing to Registry
+### 3. `VisionOutputEmbedding2JSON`
 
-If you wish to share this custom node with others in the community, you can publish it to the registry. We've already auto-populated some fields in `pyproject.toml` under `tool.comfy`, but please double-check that they are correct.
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `vision_output` | `CLIP_VISION_OUTPUT` | 来自 CLIP Vision 节点的输出 |
+| `name` | `STRING` | 用作 JSON 键名 |
 
-You need to make an account on https://registry.comfy.org and create an API key token.
+返回：
 
-- [ ] Go to the [registry](https://registry.comfy.org). Login and create a publisher id (everything after the `@` sign on your registry profile). 
-- [ ] Add the publisher id into the pyproject.toml file.
-- [ ] Create an api key on the Registry for publishing from Github. [Instructions](https://docs.comfy.org/registry/publishing#create-an-api-key-for-publishing).
-- [ ] Add it to your Github Repository Secrets as `REGISTRY_ACCESS_TOKEN`.
+- `STRING`：`{"<name>": [embedding...]}` 的 JSON 字符串
 
-A Github action will run on every git push. You can also run the Github action manually. Full instructions [here](https://docs.comfy.org/registry/publishing). Join our [discord](https://discord.com/invite/comfyorg) if you have any questions!
+### 4. `ImageHash`
 
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `images` | `IMAGE` | 输入图像张量 |
+| `names`  | `STRING` | 文件名（可列表） |
+
+返回：
+
+- `STRING`：`{"<filename>": <hash>}` 的 JSON 字符串
+
+### 5. `Base64ImageLoader`
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `base64_string` | `STRING` | 单张图像的 Base64 编码 |
+| `name` | `STRING` | 文件名（仅用于返回） |
+
+返回：
+
+- `IMAGE`、`MASK`、`STRING`（文件名）
+
+## 开发与测试
+
+```bash
+# 运行单元测试
+pytest -q
+# 代码检查（ruff）
+ruff check .
+```
+
+项目已配置 GitHub Actions，会在每次 push 时运行测试与代码格式检查。
+
+## 贡献
+
+欢迎提交 Pull Request，或在 **Discord**（https://discord.com/invite/comfyorg）讨论新功能。若要发布到 ComfyUI Registry，请参考 `pyproject.toml` 中的 `tool.comfy` 配置，并在 Registry 创建 API Token。
+
+---
+
+> 本项目基于 [cookiecutter-comfy-extension](https://github.com/Comfy-Org/cookiecutter-comfy-extension) 模板创建，旨在提供即插即用的图像处理节点。祝你玩得开心！
