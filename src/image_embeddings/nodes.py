@@ -112,8 +112,7 @@ class CustomImageLoader:
 
     @classmethod
     def IS_CHANGED(s, image_path_or_url):
-        # 如果是URL，每次都重新加载，因为内容可能已更改
-        return image_path_or_url
+        return float("NaN")
 
 
 class Image2Base64:
@@ -248,6 +247,61 @@ class ImageHashNode:
         #list to str
         return (json.dumps(hashes),)
 
+class Resize2DivisibleImage:
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "name": ("STRING",),
+                "target": ("INT", {"default": 32, "min": 2, "max": 2048, "step": 1}),
+            },
+        }
+    CATEGORY = "utils"
+    RETURN_TYPES = ('IMAGE','STRING',)
+    FUNCTION = "divisible_resize_image"
+    def divisible_resize_image(self, image, name, target):
+        """
+        将图像的宽高调整到能被target整除的尺寸
+        
+        Args:
+            image: ComfyUI的IMAGE张量 [Batch, Height, Width, Channels]
+            name: 图像名称
+            target: 目标整除数
+        
+        Returns:
+            调整后的图像和名称
+        """
+        import torch.nn.functional as F
+        
+        # 获取原始尺寸 [B, H, W, C]
+        b, h, w, c = image.shape
+        
+        # 计算能被target整除的目标尺寸
+        target_h = (h + target - 1) // target * target
+        target_w = (w + target - 1) // target * target
+        
+        # 如果尺寸不变，直接返回
+        if target_h == h and target_w == w:
+            return (image, name)
+        
+        # 将 [B, H, W, C] 转换为 [B, C, H, W] 进行卷积操作
+        image_permuted = image.permute(0, 3, 1, 2)
+        
+        # 使用双线性插值调整尺寸
+        resized = F.interpolate(
+            image_permuted, 
+            size=(target_h, target_w), 
+            mode='bilinear', 
+            align_corners=True
+        )
+        
+        # 转换回 [B, H, W, C]
+        resized = resized.permute(0, 2, 3, 1)
+        
+        return (resized, name)
+
 class Base64ImageLoader:
     @classmethod
     def INPUT_TYPES(s):
@@ -275,6 +329,9 @@ class Base64ImageLoader:
         image_bytes = base64.b64decode(base64_string)
         image = Image.open(BytesIO(image_bytes))
         return process_image(image,name)
+    @classmethod
+    def IS_CHANGED(s,base64_string,name):
+        return float("NaN")
 
 # A dictionary that contains all nodes you want to export with their names
 # NOTE: names should be globally unique
@@ -283,6 +340,7 @@ NODE_CLASS_MAPPINGS = {
     "OutputEmbedding": VisionOutputEmbedding2JSON,
     "ImageHash": ImageHashNode,
     "Image2Base64": Image2Base64,
+    "Resize2DivisibleImage": Resize2DivisibleImage,
     "Base64ImageLoader": Base64ImageLoader,
 }
 
@@ -293,4 +351,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ImageHash": "Image Hash",
     "Image2Base64": "Image to Base64",
     "Base64ImageLoader": "Base64 Image Loader",
+    "Resize2DivisibleImage": "Resize to visible Image",
 }
