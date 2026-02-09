@@ -112,7 +112,7 @@ class CustomImageLoader:
 
     @classmethod
     def IS_CHANGED(s, image_path_or_url):
-        return float("NaN")
+        return float("NaN") if image_path_or_url.startswith(('http://', 'https://')) else image_path_or_url
 
 
 class Image2Base64:
@@ -256,12 +256,62 @@ class Resize2DivisibleImage:
                 "image": ("IMAGE",),
                 "name": ("STRING",),
                 "target": ("INT", {"default": 32, "min": 2, "max": 2048, "step": 1}),
+                "max_size": ("INT", {"default": 1024, "min": 8, "max": 8192, "step": 1}),  # 0 表示不限制
             },
         }
     CATEGORY = "utils"
     RETURN_TYPES = ('IMAGE','STRING',)
     FUNCTION = "divisible_resize_image"
-    def divisible_resize_image(self, image, name, target):
+
+    def resize_image(self, image,target, max_size=0):
+        """
+        将图像的宽高调整到能被target整除的尺寸（保持宽高比例）
+        
+        Args:
+            image: ComfyUI的IMAGE张量 [Batch, Height, Width, Channels]
+            target: 目标整除数
+        
+        Returns:
+            调整后的图像
+        """
+        # 获取原始尺寸 [B, H, W, C]
+        b, h, w, c = image.shape
+
+        # 计算保持宽高比例的缩放因子，若提供 max_size 则限制最大尺寸
+        scale = 1.0
+        if max_size > 0:
+            scale = min(max_size / h, max_size / w, 1.0)
+
+        # 根据缩放因子计算新的尺寸，并取能被 target 整除的最大尺寸（向下取整）
+        new_h = int((h * scale) // target * target)
+        new_w = int((w * scale) // target * target)
+
+        # 防止尺寸为 0
+        if new_h == 0:
+            new_h = target
+        if new_w == 0:
+            new_w = target
+
+        # 如果尺寸未变化，直接返回原图
+        if new_h == h and new_w == w:
+            return image
+
+        # 将 [B, H, W, C] 转换为 [B, C, H, W] 进行卷积操作
+        image_permuted = image.permute(0, 3, 1, 2)
+
+        import torch.nn.functional as F
+        resized = F.interpolate(
+            image_permuted,
+            size=(new_h, new_w),
+            mode='bilinear',
+            align_corners=True
+        )
+
+        # 转换回 [B, H, W, C]
+        resized = resized.permute(0, 2, 3, 1).squeeze(0)
+        return resized
+
+    def divisible_resize_image(self, image, name, target, max_size=0):
         """
         将图像的宽高调整到能被target整除的尺寸
         
@@ -273,33 +323,14 @@ class Resize2DivisibleImage:
         Returns:
             调整后的图像和名称
         """
-        import torch.nn.functional as F
-        
-        # 获取原始尺寸 [B, H, W, C]
-        b, h, w, c = image.shape
-        
-        # 计算能被target整除的目标尺寸
-        target_h = (h + target - 1) // target * target
-        target_w = (w + target - 1) // target * target
-        
-        # 如果尺寸不变，直接返回
-        if target_h == h and target_w == w:
-            return (image, name)
-        
-        # 将 [B, H, W, C] 转换为 [B, C, H, W] 进行卷积操作
-        image_permuted = image.permute(0, 3, 1, 2)
-        
-        # 使用双线性插值调整尺寸
-        resized = F.interpolate(
-            image_permuted, 
-            size=(target_h, target_w), 
-            mode='bilinear', 
-            align_corners=True
-        )
-        
-        # 转换回 [B, H, W, C]
-        resized = resized.permute(0, 2, 3, 1)
-        
+        images = []
+        if isinstance(image, list):
+            images = image
+        else:
+            images = [image]
+        resized = []
+        for img in images:
+            resized.append(self.resize_image(img, target, max_size))
         return (resized, name)
 
 class Base64ImageLoader:
