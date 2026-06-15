@@ -7,6 +7,7 @@ import folder_paths
 import os
 from io import BytesIO
 from torchvision import transforms
+import sqlite3
 
 
 def process_image(img, name):
@@ -526,6 +527,97 @@ class GLMOCRNode:
         return (json.dumps(results, ensure_ascii=False),)
 
 
+class CharacterTagTrigger:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "character_name": ("STRING", {"default": ""}),
+                "artist_name": ("STRING", {"default": ""}),
+            },
+        }
+
+    CATEGORY = "utils"
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("tags",)
+    FUNCTION = "get_character_tags"
+
+    _db_path = None
+
+    def get_character_tags(self, character_name, artist_name):
+        
+        if CharacterTagTrigger._db_path is None:
+            custom_nodes_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            db_path = os.path.join(custom_nodes_dir, "animadex.db")
+            if os.path.exists(db_path):
+                CharacterTagTrigger._db_path = db_path
+            else:
+                base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                db_path = os.path.join(base_dir, "animadex.db")
+                CharacterTagTrigger._db_path = db_path
+        else:
+            db_path = CharacterTagTrigger._db_path
+
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        # 先尝试用精确匹配查询
+        cursor.execute(
+            "SELECT trigger, core_tags FROM characters WHERE name = ? OR cn_name = ?",
+            (character_name, character_name),
+        )
+        row = cursor.fetchone()
+
+        # 如果没有精确匹配，尝试模糊搜索
+        if row is None:
+            cursor.execute(
+                "SELECT trigger, core_tags FROM characters WHERE name LIKE ? OR cn_name LIKE ?",
+                (f"%{character_name}%", f"%{character_name}%"),
+            )
+            row = cursor.fetchone()
+
+        if row is None:
+            character_result = ""
+        else:
+            trigger, core_tags = row
+            character_result = ""
+            if trigger:
+                character_result += trigger
+            if core_tags:
+                if character_result:
+                    character_result += ", " + core_tags
+                else:
+                    character_result = core_tags
+
+        artist_result = ""
+        if artist_name.strip():
+            cursor.execute(
+                "SELECT trigger FROM artists WHERE name = ? OR cn_name = ?",
+                (artist_name.strip(), artist_name.strip())
+            )
+            row = cursor.fetchone()
+            if row is None:
+                cursor.execute(
+                    "SELECT trigger FROM artists WHERE name LIKE ? OR cn_name LIKE ?",
+                    (f"%{artist_name.strip()}%", f"%{artist_name.strip()}%")
+                )
+                row = cursor.fetchone()
+            
+            if row:
+                artist_result = "@" + row[0]
+
+        conn.close()
+
+        result = character_result
+        if artist_result:
+            if result:
+                result += ", " + artist_result
+            else:
+                result = artist_result
+
+        return (result,)
+
+
 # A dictionary that contains all nodes you want to export with their names
 # NOTE: names should be globally unique
 NODE_CLASS_MAPPINGS = {
@@ -536,6 +628,7 @@ NODE_CLASS_MAPPINGS = {
     "Resize2DivisibleImage": Resize2DivisibleImage,
     "Base64ImageLoader": Base64ImageLoader,
     "GLMOCRNode": GLMOCRNode,
+    "CharacterTagTrigger": CharacterTagTrigger,
 }
 
 # A dictionary that contains the friendly/humanly readable titles for the nodes
@@ -547,4 +640,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Base64ImageLoader": "Base64 Image Loader",
     "Resize2DivisibleImage": "Resize to visible Image",
     "GLMOCRNode": "GLM-OCR",
+    "CharacterTagTrigger": "Character Tag Trigger",
 }
