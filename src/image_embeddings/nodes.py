@@ -105,16 +105,16 @@ class CustomImageLoader:
             all_masks = []
             all_names = []
             for img_path in image_files:
-                img = Image.open(img_path)
-                processed_img, processed_mask, _ = process_image(img, "")
-                all_images.append(processed_img)
-                all_masks.append(processed_mask)
-                all_names.append(os.path.basename(img_path))
+                with Image.open(img_path) as img:
+                    processed_img, processed_mask, _ = process_image(img, "")
+                    all_images.append(processed_img)
+                    all_masks.append(processed_mask)
+                    all_names.append(os.path.basename(img_path))
             return (torch.cat(all_images, dim=0), torch.cat(all_masks, dim=0), all_names)
         else:
             # 原来的单个文件处理逻辑
-            img = Image.open(image_path)
-            return process_image(img, os.path.basename(image_path))
+            with Image.open(image_path) as img:
+                return process_image(img, os.path.basename(image_path))
 
     @classmethod
     def IS_CHANGED(s, image_path_or_url):
