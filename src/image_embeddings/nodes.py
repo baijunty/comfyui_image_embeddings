@@ -544,6 +544,10 @@ class CharacterTagTrigger:
 
     _db_path = None
 
+    @classmethod
+    def IS_CHANGED(s, character_name, artist_name):
+        return (character_name or "") + (artist_name or "")
+
     def get_character_tags(self, character_name, artist_name):
         
         if CharacterTagTrigger._db_path is None:

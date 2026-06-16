@@ -40,6 +40,43 @@ async def character_search_handler(request):
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
 
+async def preview_image_handler(request):
+    path = request.query.get("path", "").strip()
+    if not path:
+        return web.json_response({"success": False, "error": "No path provided"})
+
+    import os
+    from PIL import Image
+    from io import BytesIO
+    import base64
+    import folder_paths
+    import requests
+
+    try:
+        img = None
+        if path.startswith(("http://", "https://")):
+            resp = requests.get(path, timeout=30)
+            resp.raise_for_status()
+            img = Image.open(BytesIO(resp.content))
+        else:
+            resolved_path = path
+            if not os.path.isabs(path):
+                input_dir = folder_paths.get_input_directory()
+                resolved_path = os.path.join(input_dir, path)
+            if not os.path.isfile(resolved_path):
+                return web.json_response({"success": False, "error": "File not found"})
+            img = Image.open(resolved_path)
+
+        with img:
+            img = img.convert("RGB")
+            buf = BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+            b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+            data_url = f"data:image/jpeg;base64,{b64}"
+            return web.json_response({"success": True, "data_url": data_url})
+    except Exception as e:
+        return web.json_response({"success": False, "error": str(e)})
+
 async def artist_search_handler(request):
     query = request.query.get("query", "").strip()
     if not query:
@@ -60,6 +97,7 @@ async def artist_search_handler(request):
 
 if hasattr(PromptServer, "instance"):
     PromptServer.instance.app.add_routes([
+        web.get("/image_embeddings/preview_image", preview_image_handler),
         web.get("/image_embeddings/search_characters", character_search_handler),
         web.get("/image_embeddings/search_artists", artist_search_handler),
     ])
